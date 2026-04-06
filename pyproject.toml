@@ -1,43 +1,56 @@
-[tool.poetry]
-name = "fastapi-cqrs-mediator"
+[project]
+name = "template"
 version = "0.1.0"
 description = ""
-authors = ["ocbunknown"]
-readme = "README.md"
+authors = [{ name = "ocbunknown" }]
+requires-python = "~=3.12"
+dependencies = [
+    "uvloop>=0.21.0,<0.22",
+    "granian>=2.2.0,<3",
+    "pydantic-settings>=2.8.1,<3",
+    "uuid-utils>=0.10.0,<0.11",
+    "redis>=5.2.1,<6",
+    "types-redis>=4.6.0.20241004,<5",
+    "dishka>=1.5.2,<2",
+    "nats-py>=2.10.0,<3",
+    "aiohttp>=3.11.15,<4",
+    "pydantic>=2.11.1,<3",
+    "argon2-cffi>=23.1.0,<24",
+    "pyjwt>=2.10.1,<3",
+    "sqlalchemy>=2.0.40,<3",
+    "alembic>=1.15.2,<2",
+    "asyncpg>=0.30.0,<0.31",
+    "greenlet>=3.1.1",
+    "fastapi>=0.115.12",
+    "orjson>=3.10.16",
+    "uvicorn>=0.34.2",
+    "aioboto3>=15.5.0",
+    "aiofiles>=25.1.0",
+    "faststream>=0.5.0",
+    "taskiq>=0.11.0",
+    "taskiq-nats>=0.5.0",
+    "msgpack>=1.1.0",
+    "sqla-autoloads>=0.1.5",
+    "structlog>=24.4.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.12"
-fastapi = "^0.115.4"
-alembic = "^1.13.3"
-sqlalchemy = "^2.0.36"
-uvloop = "^0.21.0"
-asyncpg = "^0.30.0"
-pydantic-settings = "^2.6.1"
-orjson = "^3.10.11"
-uvicorn = "^0.32.0"
-argon2-cffi = "^23.1.0"
-certifi = "^2024.8.30"
-aiohttp = "^3.10.10"
-redis = "^5.2.0"
-types-redis = "^4.6.0.20241004"
-greenlet = "^3.1.1"
 
-[tool.poetry.group.test]
-optional = true
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0,<2",
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.24.0",
+    "pytest-xdist>=3.6.0",
+    "anyio>=4.7.0",
+    "psycopg2-binary>=2.9.9",
+    "httpx>=0.27.0",
+    "ruff>=0.11.2,<0.12",
+    "testcontainers>=4.10.0",
+]
 
-[tool.poetry.group.test.dependencies]
-pytest = "*"
-pytest-asyncio = "*"
-
-[tool.poetry.group.lint]
-optional = true
-
-[tool.poetry.group.lint.dependencies]
-ruff = "*"
-mypy = "*"
 
 [tool.mypy]
-# disable_error_code = ["union-attr", "var-annotated"]
 warn_unused_ignores = false
 follow_imports_for_stubs = true
 pretty = true
@@ -49,20 +62,25 @@ warn_unreachable = true
 warn_no_return = true
 
 [tool.ruff]
-lint.ignore = ["E501", "B008", "C901", "W191", "UP007", "UP006"]
+lint.ignore = ["E501", "B008", "C901", "W191", "UP007", "UP006", "UP035"]
 
 lint.select = ["E", "W", "F", "I", "C", "B", "UP"]
-
-[tool.ruff.lint.extend-per-file-ignores]
-"tests/*.py" = ["ANN401", "S101", "S311"]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-p no:warnings" # Disabling warning capture entirely
-
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = [
+    "-p", "no:warnings",
+    "--strict-markers",
+    "-n", "auto",
+    "--dist", "loadfile",
+]
+markers = [
+    "unit: fast tests with no I/O (mocks/fakes only)",
+    "integration: tests with real DB/Redis/NATS via testcontainers",
+    "e2e: full HTTP-stack tests through real app + DB",
+    "slow: tests over 1 second",
+]

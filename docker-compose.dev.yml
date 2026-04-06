@@ -1,0 +1,67 @@
+services:
+  postgres:
+    container_name: template-postgres-dev
+    image: postgres:15.6-alpine3.19
+    restart: unless-stopped
+    ports:
+      - "54522:5432"
+    env_file:
+      - ./.env
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_DB: ${DB_NAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - interconnect
+
+  redis:
+    container_name: template-redis-dev
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "63122:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interconnect
+
+  nats:
+    container_name: template-nats-dev
+    image: nats:2-alpine
+    restart: unless-stopped
+    ports:
+      - "4222:4222"
+      - "6222:6222"
+      - "8222:8222"
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interconnect
+
+volumes:
+  postgres_data: {}
+  nats_data: {}
+
+networks:
+  interconnect:
+    driver: bridge

@@ -1,59 +1,116 @@
-services:
-  api:
-    container_name: api-fastapi-cqrs
-    build:
-      dockerfile: ./Dockerfile
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - interconnect
-      - postgres.network
-    volumes:
-      - ./fastapi-cqrs-mediator:/app
-    env_file:
-      - .env
-    command: /bin/sh -c 'alembic upgrade head && python -m src'
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsSL http://localhost:8000/api/v1/healthcheck"]
-      interval: 10s
-      timeout: 60s
-      retries: 5
-      start_period: 10s
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: template-app:latest
+  env_file:
+    - ./.env
+  environment:
+    DB_HOST: postgres
+    REDIS_HOST: redis
+    NATS_SERVERS: '["nats://nats:4222"]'
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    nats:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - interconnect
 
+services:
   postgres:
-    container_name: postgres-fastapi-cqrs
-    image: "postgres:15.6-alpine3.19"
-    hostname: postgres
+    container_name: template-postgres
+    image: postgres:15.6-alpine3.19
     restart: unless-stopped
-    ports:
-      - '5444:5432'
-    networks:
-      - interconnect
-      - postgres.network
     env_file:
-      - "./.env"
+      - ./.env
     environment:
-      POSTGRES_USER: ${DB_USER:-$USER}
-      POSTGRES_DB: ${DB_NAME:-$USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_DB: ${DB_NAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
-      - postgres.data:/var/lib/postgresql/users:rw
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
       interval: 10s
-      timeout: 60s
+      timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - interconnect
 
+  redis:
+    container_name: template-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interconnect
+
+  nats:
+    container_name: template-nats
+    image: nats:2-alpine
+    restart: unless-stopped
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interconnect
+
+  migrate:
+    <<: *app-base
+    container_name: template-migrate
+    profiles: ["migrate"]
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+
+  http:
+    <<: *app-base
+    container_name: template-http
+    command: ["python", "-m", "src.entrypoints.http"]
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      NATS_SERVERS: '["nats://nats:4222"]'
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+    ports:
+      - "8080:8080"
+
+  consumer:
+    <<: *app-base
+    container_name: template-consumer
+    command: ["faststream", "run", "src.entrypoints.consumer:app"]
+
+  worker:
+    <<: *app-base
+    container_name: template-worker
+    command: ["taskiq", "worker", "src.entrypoints.tasks:broker", "--fs-discover"]
+
+  scheduler:
+    <<: *app-base
+    container_name: template-scheduler
+    command: ["taskiq", "scheduler", "src.entrypoints.tasks:scheduler", "--fs-discover"]
 
 volumes:
-  postgres.data: {}
+  postgres_data: {}
+  nats_data: {}
 
 networks:
   interconnect:
     driver: bridge
-  postgres.network: {}

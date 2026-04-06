@@ -1,6 +1,7 @@
 import asyncio
+from collections.abc import Iterable
 from logging.config import fileConfig
-from typing import Iterable, List, Optional, Union
+from typing import List, Optional, Union
 
 from alembic import context
 from alembic.operations.ops import MigrationScript
@@ -10,16 +11,19 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from src.core.settings import load_settings
-from src.database.models import Base
+from src.database.psql.models import Base
+from src.settings.core import load_settings
 
 config = context.config
-config.set_main_option("sqlalchemy.url", load_settings().db.url)
+
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+if not (url := config.get_main_option("sqlalchemy.url")):
+    url = load_settings().db.url
 
 
 def add_number_to_migrations(
@@ -39,18 +43,6 @@ def add_number_to_migrations(
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -74,15 +66,12 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        future=True,
+        url=url,
     )
 
     async with connectable.connect() as connection:
@@ -92,9 +81,12 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
+    connectable = config.attributes.get("connection", None)
 
-    asyncio.run(run_async_migrations())
+    if connectable:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

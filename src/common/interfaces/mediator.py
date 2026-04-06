@@ -1,6 +1,0 @@
-from typing import Any, Protocol
-
-
-class MediatorProtocol(Protocol):
-    def __init__(self) -> None: ...
-    async def send(self, query: Any, **kw: Any) -> Any: ...

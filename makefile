@@ -1,41 +1,125 @@
+PYTHON ?= uv run
+COMPOSE ?= docker compose
+COMPOSE_DEV ?= docker compose -f docker-compose.dev.yml
+
+.PHONY: help
+help:
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: install
+install: ## Install all dependencies
+	uv sync --all-groups
+
+.PHONY: sync
+sync: ## Sync runtime dependencies
+	uv sync --frozen --no-dev
+
+.PHONY: lock
+lock: ## Refresh uv.lock
+	uv lock
+
 .PHONY: upgrade
-upgrade: ## Run Alembic migrations
-	alembic upgrade head
+upgrade: ## Apply Alembic migrations
+	$(PYTHON) alembic upgrade head
 
 .PHONY: downgrade
-downgrade: ## Rollback Alembic migrations
-	alembic downgrade -1
+downgrade: ## Rollback last Alembic migration
+	$(PYTHON) alembic downgrade -1
 
 .PHONY: generate
-generate:
-	alembic revision --autogenerate -m "$(NAME)"
+generate: ## Autogenerate Alembic revision (NAME=...)
+	$(PYTHON) alembic revision --autogenerate -m "$(NAME)"
 
-.PHONY: docker_build
-docker_build: ## Build Docker image
-	docker compose build
+.PHONY: history
+history: ## Show Alembic history
+	$(PYTHON) alembic history
 
-.PHONY: docker_rebuild
-docker_rebuild: ## Rebuild Docker image
-	docker compose down
-	docker compose build --no-cache
+.PHONY: run-http
+run-http: ## Run HTTP API
+	$(PYTHON) python -m src.entrypoints.http
 
-.PHONY: docker_up
-docker_up: ## Run Docker container
-	docker compose up -d
+.PHONY: run-consumer
+run-consumer: ## Run message consumer
+	$(PYTHON) faststream run src.entrypoints.consumer:app
 
-.PHONY: docker_dev_up
-docker_dev_up: ## Run Docker container
-	docker compose -f docker-compose.dev.yml up -d
+.PHONY: run-worker
+run-worker: ## Run Taskiq worker
+	$(PYTHON) taskiq worker src.entrypoints.tasks:broker --fs-discover
 
-.PHONY: docker_dev_rebuild
-docker_dev_rebuild: ## Run Docker container
-	docker compose -f docker-compose.dev.yml down
-	docker compose -f docker-compose.dev.yml build --no-cache
+.PHONY: run-scheduler
+run-scheduler: ## Run Taskiq scheduler
+	$(PYTHON) taskiq scheduler src.entrypoints.tasks:scheduler --fs-discover
 
-.PHONY: docker_dev_down
-docker_dev_down: ## Run Docker container
-	docker compose -f docker-compose.dev.yml down
+.PHONY: lint
+lint: ## Run ruff linter
+	$(PYTHON) ruff check src tests
 
-.PHONY: docker_down
-docker_down: ## Stop Docker container
-	docker compose down
+.PHONY: format
+format: ## Format code
+	$(PYTHON) ruff format src tests
+	$(PYTHON) ruff check --fix src tests
+
+.PHONY: typecheck
+typecheck: ## Run mypy
+	$(PYTHON) mypy src
+
+.PHONY: check
+check: lint typecheck ## Run static checks
+
+.PHONY: test
+test: ## Run all tests
+	$(PYTHON) pytest
+
+.PHONY: test-unit
+test-unit: ## Run unit tests
+	$(PYTHON) pytest -m unit
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	$(PYTHON) pytest -m integration
+
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests
+	$(PYTHON) pytest -m e2e
+
+.PHONY: docker-build
+docker-build: ## Build production images
+	$(COMPOSE) build
+
+.PHONY: docker-rebuild
+docker-rebuild: ## Rebuild production images
+	$(COMPOSE) down
+	$(COMPOSE) build --no-cache
+
+.PHONY: docker-up
+docker-up: ## Start full stack
+	$(COMPOSE) up -d
+
+.PHONY: docker-down
+docker-down: ## Stop full stack
+	$(COMPOSE) down
+
+.PHONY: docker-logs
+docker-logs: ## Tail logs
+	$(COMPOSE) logs -f
+
+.PHONY: docker-migrate
+docker-migrate: ## Run migrations in container
+	$(COMPOSE) run --rm migrate
+
+.PHONY: docker-dev-up
+docker-dev-up: ## Start dev infra
+	$(COMPOSE_DEV) up -d
+
+.PHONY: docker-dev-down
+docker-dev-down: ## Stop dev infra
+	$(COMPOSE_DEV) down
+
+.PHONY: docker-dev-rebuild
+docker-dev-rebuild: ## Rebuild dev infra
+	$(COMPOSE_DEV) down
+	$(COMPOSE_DEV) build --no-cache
+
+.PHONY: docker-dev-logs
+docker-dev-logs: ## Tail dev infra logs
+	$(COMPOSE_DEV) logs -f
