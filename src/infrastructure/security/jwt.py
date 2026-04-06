@@ -1,6 +1,6 @@
 import base64
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, Optional, cast
+from typing import Any, Literal, Optional
 
 import jwt
 
@@ -56,12 +56,10 @@ class JWT:
 
     def verify_token(self, token: str) -> dict[str, Any]:
         try:
-            result = jwt.decode(
+            return jwt.decode(
                 token,
                 base64.b64decode(self._settings.public_key),
                 [self._settings.algorithm],
             )
         except jwt.PyJWTError as e:
             raise UnAuthorizedError("Token is invalid or expired") from e
-
-        return cast(dict[str, Any], result)

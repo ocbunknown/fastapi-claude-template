@@ -72,11 +72,11 @@ make upgrade
 uv run python -m src
 
 # Message consumer (FastStream over NATS)
-uv run faststream run src.entrypoints.consumer:app
+uv run faststream run src.entrypoints.consumers:app
 
 # Scheduler (Taskiq)
-uv run taskiq worker src.entrypoints.scheduler:broker
-uv run taskiq scheduler src.entrypoints.scheduler:scheduler
+uv run taskiq worker src.entrypoints.tasks:broker
+uv run taskiq scheduler src.entrypoints.tasks:scheduler
 ```
 
 Each transport has its own entry point under `src/entrypoints/` and all three share the same Dishka container built by `entrypoints/container.py::build_container(settings, *extras)`.
@@ -108,7 +108,7 @@ src/
 ├── consumers/         INBOUND ADAPTER — FastStream (NATS subscribers)
 ├── tasks/             INBOUND ADAPTER — Taskiq (scheduled jobs)
 │
-├── entrypoints/       composition root: http.py, consumer.py, scheduler.py, container.py
+├── entrypoints/       composition root: http.py, consumers.py, tasks.py, container.py
 ├── common/            leaf utilities (Dishka helpers, formatters, types)
 └── settings/          Pydantic Settings
 ```
@@ -149,6 +149,7 @@ Custom skills that kick in when Claude is working on a specific kind of file. Ea
 | **`endpoint`** | editing `src/presentation/http/v1/endpoints/<audience>/` | audience-first organization, the **five-parameter list shape** (`mediator / query / pagination / loads / return`), parameter naming (`query` for GET filters, `data` for POST/PATCH/PUT bodies), strict contract ↔ Result mapping, privileged-field lockdown between `UpdateSelf` vs `AdminUpdateX` contracts |
 | **`repository`** | editing `src/database/psql/repositories/` | the fixed CRUD verb vocabulary (`create`, `select`, `select_many`, `update`, `delete`, `exists`, `count`, `upsert` — no invented names like `find_one` or `save`), `@on_integrity` for unique constraints, `sqla_select` for eager loading, `Result[T]` return wrapping, `limit: Optional[int] = None` for unbounded internal callers |
 | **`migration`** | adding/changing schema | migrations are generated via `make generate NAME=...`, never hand-written; existing files in `migrations/versions/` are immutable history; data migrations + enum additions need manual `op.execute` |
+| **`tests`** | editing `tests/unit/`, `tests/integration/`, `tests/e2e/` | per-use-case unit coverage, per-endpoint e2e coverage, **mutation-persistence tests** (follow every PATCH/POST with a GET to verify the change landed — not just assert 200), Contract↔Request field-mismatch detection, `loads=` opt-in-and-opt-out flow tests, authorization matrix (unauth + wrong-role), contract validation boundaries, and the e2e infra gotchas (`httpx.AsyncClient` + `ASGITransport` instead of `TestClient`, sync alembic fixture, session-scoped asyncio loop, HS256 key matching) |
 
 ### Hooks (`.claude/hooks/`)
 
@@ -218,10 +219,10 @@ The canonical walkthrough is in [`CLAUDE.md`](./CLAUDE.md#adding-a-new-feature--
 9. **Endpoint** — pick the audience folder, follow the five-parameter shape for lists
 10. **Tests** — unit + integration + e2e
 
-If you're using Claude Code, the `usecase` / `endpoint` / `repository` / `migration` skills will walk you through each step with the exact patterns.
+If you're using Claude Code, the `usecase` / `endpoint` / `repository` / `migration` / `tests` skills will walk you through each step with the exact patterns — including the test-coverage scenarios that prevent the classic "returned 200 but the mutation silently dropped a field" gap.
 
 ---
 
 ## License
 
-MIT (or whatever you prefer — update this section before publishing).
+Released under the [MIT License](./LICENSE) — see the `LICENSE` file for the full text.

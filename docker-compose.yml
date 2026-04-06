@@ -3,6 +3,7 @@ x-app-base: &app-base
     context: .
     dockerfile: Dockerfile
   image: template-app:latest
+  init: true
   env_file:
     - ./.env
   environment:
@@ -92,20 +93,21 @@ services:
     ports:
       - "8080:8080"
 
-  consumer:
+  consumers:
     <<: *app-base
-    container_name: template-consumer
-    command: ["faststream", "run", "src.entrypoints.consumer:app"]
+    container_name: template-consumers
+    command: ["faststream", "run", "src.entrypoints.consumers:app"]
 
   worker:
     <<: *app-base
     container_name: template-worker
-    command: ["taskiq", "worker", "src.entrypoints.tasks:broker", "--fs-discover"]
+    command: ["taskiq", "worker", "src.entrypoints.tasks:broker"]
 
   scheduler:
     <<: *app-base
     container_name: template-scheduler
-    command: ["taskiq", "scheduler", "src.entrypoints.tasks:scheduler", "--fs-discover"]
+    stop_signal: SIGINT
+    command: ["taskiq", "scheduler", "src.entrypoints.tasks:scheduler"]
 
 volumes:
   postgres_data: {}

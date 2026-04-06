@@ -63,8 +63,8 @@ src/
 ├── entrypoints/          ← composition root + module-level app instances
 │   ├── container.py      ← build_container() — shared across all transports
 │   ├── http.py           ← FastAPI app + lifespan + run()
-│   ├── consumer.py       ← FastStream app
-│   ├── scheduler.py      ← Taskiq broker + scheduler
+│   ├── consumers.py      ← FastStream app
+│   ├── tasks.py          ← Taskiq broker + scheduler
 │   └── server/           ← ASGI server runners (granian) — process bootstrap
 │
 ├── common/               ← shared leaf utilities (no upper-layer deps)

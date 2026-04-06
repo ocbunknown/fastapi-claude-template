@@ -41,4 +41,4 @@ class PermissionUseCase(UseCase[PermissionRequest, UserResult]):
                 if user.role.name not in allowed_roles:
                     raise UnAuthorizedError("Not Allowed")
 
-            return UserResult.model_validate(user)
+            return UserResult(**user.as_dict())

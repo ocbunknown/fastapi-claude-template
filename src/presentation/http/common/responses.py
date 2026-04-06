@@ -1,13 +1,15 @@
 from collections.abc import Mapping
 from typing import Any, Optional
 
-from fastapi.responses import ORJSONResponse as _ORJSONResponse
 from starlette.background import BackgroundTask
+from starlette.responses import JSONResponse
 
 from src.presentation.http.common.serializers.orjson import orjson_dumps
 
 
-class ORJSONResponse(_ORJSONResponse):
+class ORJSONResponse(JSONResponse):
+    media_type = "application/json"
+
     def render(self, content: Any) -> bytes:
         return orjson_dumps(content)
 

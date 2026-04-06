@@ -11,8 +11,8 @@ from src.tasks.broker import create_taskiq_broker, create_taskiq_scheduler
 log = structlog.get_logger(__name__)
 
 
-def create_scheduler(settings: Settings) -> tuple[AsyncBroker, TaskiqScheduler]:
-    log.info("Initialize scheduler (Taskiq) application")
+def create_tasks(settings: Settings) -> tuple[AsyncBroker, TaskiqScheduler]:
+    log.info("Initialize tasks (Taskiq) application")
 
     broker = create_taskiq_broker(settings)
     scheduler = create_taskiq_scheduler(broker)
@@ -20,9 +20,17 @@ def create_scheduler(settings: Settings) -> tuple[AsyncBroker, TaskiqScheduler]:
     container = build_container(settings, TaskiqProvider())
     setup_dishka(container, broker)
 
-    @broker.on_event(TaskiqEvents.WORKER_SHUTDOWN, TaskiqEvents.CLIENT_SHUTDOWN)
-    async def close_container(state: TaskiqState) -> None:
+    async def on_startup(state: TaskiqState) -> None:
+        log.info("Taskiq application started")
+
+    async def on_shutdown(state: TaskiqState) -> None:
+        log.info("Taskiq application shutting down")
         await container.close()
+
+    broker.add_event_handler(TaskiqEvents.WORKER_STARTUP, on_startup)
+    broker.add_event_handler(TaskiqEvents.CLIENT_STARTUP, on_startup)
+    broker.add_event_handler(TaskiqEvents.WORKER_SHUTDOWN, on_shutdown)
+    broker.add_event_handler(TaskiqEvents.CLIENT_SHUTDOWN, on_shutdown)
 
     setup_tasks(broker)
 
@@ -31,4 +39,4 @@ def create_scheduler(settings: Settings) -> tuple[AsyncBroker, TaskiqScheduler]:
 
 settings = load_settings()
 setup_logging(settings)
-broker, scheduler = create_scheduler(settings)
+broker, scheduler = create_tasks(settings)

@@ -38,17 +38,17 @@ history: ## Show Alembic history
 run-http: ## Run HTTP API
 	$(PYTHON) python -m src.entrypoints.http
 
-.PHONY: run-consumer
-run-consumer: ## Run message consumer
-	$(PYTHON) faststream run src.entrypoints.consumer:app
+.PHONY: run-consumers
+run-consumers: ## Run message consumers
+	$(PYTHON) faststream run src.entrypoints.consumers:app
 
 .PHONY: run-worker
 run-worker: ## Run Taskiq worker
-	$(PYTHON) taskiq worker src.entrypoints.tasks:broker --fs-discover
+	$(PYTHON) taskiq worker src.entrypoints.tasks:broker
 
 .PHONY: run-scheduler
 run-scheduler: ## Run Taskiq scheduler
-	$(PYTHON) taskiq scheduler src.entrypoints.tasks:scheduler --fs-discover
+	$(PYTHON) taskiq scheduler src.entrypoints.tasks:scheduler
 
 .PHONY: lint
 lint: ## Run ruff linter

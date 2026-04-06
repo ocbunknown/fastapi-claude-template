@@ -1,5 +1,5 @@
 import structlog
-from dishka.integrations.faststream import FastStreamProvider, setup_dishka
+from dishka_faststream import FastStreamProvider, setup_dishka
 from faststream import FastStream
 from faststream.nats import NatsBroker as FaststreamNatsBroker
 from faststream.security import SASLPlaintext
@@ -13,13 +13,11 @@ from src.settings.core import Settings, load_settings
 log = structlog.get_logger(__name__)
 
 
-def create_consumer(settings: Settings) -> FastStream:
-    log.info("Initialize consumer (FastStream) application")
+def create_consumers(settings: Settings) -> FastStream:
+    log.info("Initialize consumers (FastStream) application")
 
     security = (
-        SASLPlaintext(
-            username=settings.nats.user, password=settings.nats.password
-        )
+        SASLPlaintext(username=settings.nats.user, password=settings.nats.password)
         if settings.nats.user and settings.nats.password
         else None
     )
@@ -42,4 +40,4 @@ def create_consumer(settings: Settings) -> FastStream:
 
 settings = load_settings()
 setup_logging(settings)
-app = create_consumer(settings)
+app = create_consumers(settings)

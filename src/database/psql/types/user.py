@@ -15,3 +15,4 @@ class UpdateUserType(TypedDict, total=False):
     login: str | None
     password: str | None
     role_uuid: UUID | None
+    active: bool | None

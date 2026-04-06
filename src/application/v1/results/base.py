@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict
@@ -17,7 +19,7 @@ class OffsetResult[T](Result):
     limit: int | None = None
     total: int
 
-    def map[R](self, fn: Callable[[T], R]) -> "OffsetResult[R]":
+    def map[R](self, fn: Callable[[T], R]) -> OffsetResult[R]:
         return OffsetResult[R](
             data=[fn(item) for item in self.data],
             offset=self.offset,

@@ -52,4 +52,4 @@ class CreateUserUseCase(UseCase[CreateUserRequest, UserResult]):
                     role_uuid=request.role_uuid,
                 )
             ).result()
-            return UserResult.model_validate(user)
+            return UserResult(**user.as_dict())
