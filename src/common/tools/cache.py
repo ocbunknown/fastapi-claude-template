@@ -1,15 +1,9 @@
 from typing import Any
 
 
-def default_key_builder(
-    *keys: str,
-    data: dict[str, Any] | None = None,
-    separator: str = ".",
-    **kwargs: Any,
+def default_cache_key_builder(
+    data: dict[str, Any] | None = None, **kwargs: Any
 ) -> str:
-    parts = list(keys)
-    if data:
-        parts.extend(f"{k}{separator}{v}" for k, v in data.items())
-
-    parts.extend(f"{k}{separator}{v}" for k, v in kwargs.items())
-    return separator.join(parts)
+    data = data or kwargs
+    sorted_data = {key: data[key] for key in sorted(data.keys())}
+    return ":".join(f"{k}:{v}" for k, v in sorted_data.items())

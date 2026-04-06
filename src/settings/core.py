@@ -71,6 +71,7 @@ class AppSettings(BaseSettings):
     version: str = "0.0.1"
     production: bool = True
     swagger: bool = True
+    log_level: str = "DEBUG"
 
 
 class RedisSettings(BaseSettings):
