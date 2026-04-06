@@ -55,7 +55,7 @@ def create_app(
 
     setup_v1_routers(app)
     setup_exception_handlers(app)
-    setup_global_middlewares(app)
+    setup_global_middlewares(app, settings.server)
 
     return app
 

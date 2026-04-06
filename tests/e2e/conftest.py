@@ -47,9 +47,7 @@ class _TestDatabaseProvider(Provider):
         return self._test_factory
 
     @provide
-    def database_factory(
-        self, session_factory: SessionFactoryType
-    ) -> DatabaseFactory:
+    def database_factory(self, session_factory: SessionFactoryType) -> DatabaseFactory:
         return create_database_factory(TransactionManager, session_factory)
 
     @provide(scope=Scope.REQUEST)
@@ -76,7 +74,7 @@ async def e2e_app(
     setup_dishka(container, app)
     setup_v1_routers(app)
     setup_exception_handlers(app)
-    setup_global_middlewares(app)
+    setup_global_middlewares(app, settings.server)
 
     try:
         yield app
@@ -106,9 +104,7 @@ async def hasher(e2e_app: FastAPI) -> Hasher:
 
 
 @pytest.fixture
-async def admin_credentials(
-    database: DBGateway, hasher: Hasher
-) -> tuple[str, str]:
+async def admin_credentials(database: DBGateway, hasher: Hasher) -> tuple[str, str]:
     """Seed an Admin-role user directly via the DBGateway and return its
     plaintext credentials. Bypasses the register/confirm flow because that
     requires an out-of-band verification code."""
