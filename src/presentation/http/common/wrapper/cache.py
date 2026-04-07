@@ -6,7 +6,7 @@ from fastapi import Request as HttpRequest
 from pydantic import BaseModel
 
 from src.application.common.interfaces.cache import StrCache
-from src.application.common.interfaces.mediator import Mediator
+from src.application.common.interfaces.usecase import UseCase
 from src.application.common.request import Request
 from src.common.di import Depends, inject
 from src.common.tools.cache import default_cache_key_builder
@@ -56,16 +56,12 @@ class ResponseCache:
         self._cache: Optional[StrCache] = None
 
     @inject
-    async def __call__(
-        self, request: HttpRequest, cache: Depends[StrCache]
-    ) -> Self:
+    async def __call__(self, request: HttpRequest, cache: Depends[StrCache]) -> Self:
         self.request = request
         self._cache = cache
         return self
 
-    async def execute[Q: Request, R](
-        self, mediator: Mediator, request: Q
-    ) -> R:
+    async def execute[Q: Request, R](self, use_case: UseCase[Q, R], message: Q, /) -> R:
         if self.request is None or self._cache is None:
             raise RuntimeError("ResponseCache must be called before execute")
 
@@ -77,19 +73,22 @@ class ResponseCache:
         if cached is not None:
             return cached
 
-        return await self._set(cache_key, mediator, request)
+        result: R = await use_case(message)
+        if isinstance(result, BaseModel):
+            await self._cache.set(
+                cache_key,
+                result.model_dump_json(exclude_none=True),
+                expire=self.expires_in,
+            )
+        return result
 
     @inject
-    async def invalidate(
-        self, request: HttpRequest, cache: Depends[StrCache]
-    ) -> None:
+    async def invalidate(self, request: HttpRequest, cache: Depends[StrCache]) -> None:
         formatted_key = await self._format_key(request, self.key)
         if formatted_key:
             await cache.delete(formatted_key)
 
-    async def _extract_request_values(
-        self, request: HttpRequest
-    ) -> dict[str, Any]:
+    async def _extract_request_values(self, request: HttpRequest) -> dict[str, Any]:
         body = await _extract_body_keys(request)
         return {**_extract_query_keys(request), **body}
 
@@ -111,18 +110,3 @@ class ResponseCache:
         if self._cache is None:
             raise RuntimeError("ResponseCache must be called before _get")
         return cast(R | None, await self._cache.get(cache_key))
-
-    async def _set[Q: Request, R](
-        self, cache_key: str, mediator: Mediator, request: Q
-    ) -> R:
-        if self._cache is None:
-            raise RuntimeError("ResponseCache must be called before _set")
-
-        result: R = await mediator.send(request)
-        if isinstance(result, BaseModel):
-            await self._cache.set(
-                cache_key,
-                result.model_dump_json(exclude_none=True),
-                expire=self.expires_in,
-            )
-        return result

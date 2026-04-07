@@ -1,7 +1,7 @@
 from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Request, status
 
-from src.application.common.interfaces.mediator import Mediator
+from src.application.common.interfaces.request_bus import RequestBus
 from src.application.v1.results import StatusResult
 from src.application.v1.services.auth import TokensExpire
 from src.application.v1.usecases.auth import (
@@ -15,9 +15,7 @@ from src.presentation.http.common.responses import OkResponse
 from src.presentation.http.v1 import contracts
 from src.settings.core import Settings
 
-public_auth_router = APIRouter(
-    prefix="/auth", tags=["Public"], route_class=DishkaRoute
-)
+public_auth_router = APIRouter(prefix="/auth", tags=["Public"], route_class=DishkaRoute)
 
 
 @public_auth_router.post(
@@ -27,9 +25,9 @@ public_auth_router = APIRouter(
 )
 async def register_endpoint(
     body: contracts.Register,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
 ) -> OkResponse[contracts.Status]:
-    result: StatusResult = await mediator.send(
+    result: StatusResult = await request_bus.send(
         RegisterRequest(
             login=body.login,
             password=body.password,
@@ -46,10 +44,10 @@ async def register_endpoint(
 )
 async def confirm_register_endpoint(
     body: contracts.VerificationCode,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     settings: Depends[Settings],
 ) -> OkResponse[contracts.Token]:
-    result: TokensExpire = await mediator.send(
+    result: TokensExpire = await request_bus.send(
         ConfirmRegisterRequest(code=body.code)
     )
     response = OkResponse(contracts.Token(token=result.tokens.access))
@@ -71,10 +69,10 @@ async def confirm_register_endpoint(
 )
 async def login_endpoint(
     body: contracts.Login,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     settings: Depends[Settings],
 ) -> OkResponse[contracts.Token]:
-    result: TokensExpire = await mediator.send(
+    result: TokensExpire = await request_bus.send(
         LoginRequest(
             login=body.login,
             password=body.password,
@@ -101,10 +99,10 @@ async def login_endpoint(
 async def refresh_endpoint(
     request: Request,
     body: contracts.Fingerprint,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     settings: Depends[Settings],
 ) -> OkResponse[contracts.Token]:
-    result: TokensExpire = await mediator.send(
+    result: TokensExpire = await request_bus.send(
         RefreshTokenRequest(
             fingerprint=body.fingerprint,
             refresh_token=request.cookies.get("refresh_token", ""),

@@ -3,10 +3,12 @@ from starlette.middleware.cors import CORSMiddleware
 
 from src.settings.core import ServerSettings
 
+from .access_log import AccessLogMiddleware
 from .request_id import RequestIDMiddleware
 
 
 def setup_global_middlewares(app: FastAPI, server: ServerSettings) -> None:
+    app.add_middleware(AccessLogMiddleware)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(
         CORSMiddleware,

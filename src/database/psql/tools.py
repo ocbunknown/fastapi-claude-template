@@ -8,7 +8,13 @@ from typing import (
     Union,
 )
 
-from sqla_autoloads import add_conditions, sqla_select
+from sqla_autoloads import (
+    add_conditions,
+    sqla_cursor_query,
+    sqla_offset_query,
+    sqla_select,
+    unique_scalars,
+)
 from sqlalchemy.exc import IntegrityError
 
 from src.application.common.exceptions import AppException, ConflictError
@@ -16,7 +22,10 @@ from src.application.common.exceptions import AppException, ConflictError
 __all__ = (
     "add_conditions",
     "on_integrity",
+    "sqla_cursor_query",
+    "sqla_offset_query",
     "sqla_select",
+    "unique_scalars",
 )
 
 

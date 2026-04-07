@@ -63,7 +63,7 @@ def create_app(
 def run(settings: Settings) -> None:
     match settings.server.type:
         case "granian":
-            run_api_granian("src.entrypoints.http:app", settings.server)
+            run_api_granian("src.entrypoints.http:create_app_factory", settings.server)
         case _:
             raise ValueError(
                 f"Unsupported server type: '{settings.server.type}'. "
@@ -71,10 +71,17 @@ def run(settings: Settings) -> None:
             )
 
 
-settings = load_settings()
-setup_logging(settings)
-app = create_app(settings)
+def create_app_factory() -> FastAPI:
+    settings = load_settings()
+    setup_logging(settings)
+    return create_app(settings)
+
+
+def main() -> None:
+    settings = load_settings()
+    setup_logging(settings)
+    run(settings)
 
 
 if __name__ == "__main__":
-    run(settings)
+    main()

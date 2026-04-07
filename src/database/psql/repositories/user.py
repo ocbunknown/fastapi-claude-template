@@ -1,14 +1,19 @@
 from collections.abc import Sequence
-from typing import Any, Optional, Unpack
+from typing import Optional, Unpack
 
 import uuid_utils.compat as uuid
-from sqlalchemy import ColumnExpressionArgument, UnaryExpression
+from sqlalchemy import ColumnExpressionArgument
 
 import src.database.psql.models as models
 from src.database.psql.exceptions import InvalidParamsError
 from src.database.psql.repositories import Result
 from src.database.psql.repositories.base import BaseRepository
-from src.database.psql.tools import on_integrity, sqla_select
+from src.database.psql.tools import (
+    on_integrity,
+    sqla_offset_query,
+    sqla_select,
+    unique_scalars,
+)
 from src.database.psql.types import OrderBy
 from src.database.psql.types.user import (
     CreateUserType,
@@ -41,7 +46,9 @@ class UserRepository(BaseRepository[models.User]):
             where_clauses.append(self.model.login == login)
 
         stmt = sqla_select(model=self.model, loads=loads).where(*where_clauses)
-        return Result("select", (await self._session.scalars(stmt)).unique().first())
+        return Result(
+            "select", unique_scalars(await self._session.execute(stmt)).first()
+        )
 
     @on_integrity("login")
     async def update(
@@ -82,28 +89,26 @@ class UserRepository(BaseRepository[models.User]):
         limit: Optional[int] = None,
     ) -> Result[tuple[int, Sequence[models.User]]]:
         where_clauses: list[ColumnExpressionArgument[bool]] = []
-        order_by_clauses: list[UnaryExpression[Any]] = []
 
         if login:
             where_clauses.append(self.model.login.ilike(f"%{login}%"))
         if role_uuid:
             where_clauses.append(self.model.role_uuid == role_uuid)
-        if order_by:
-            order_by_clauses.append(getattr(self.model.created_at, order_by)())
 
         total = await self._crud.count(*where_clauses)
         if total <= 0:
             return Result("select", (total, []))
 
-        stmt = (
-            sqla_select(model=self.model, loads=loads)
-            .where(*where_clauses)
-            .order_by(*order_by_clauses)
-            .limit(limit)
-            .offset(offset)
+        stmt = sqla_offset_query(
+            self.model,
+            loads=loads,
+            offset=offset,
+            limit=limit,
+            order=("created_at", order_by),
+            where=where_clauses,
         )
 
-        results = (await self._session.scalars(stmt)).unique().all()
+        results = unique_scalars(await self._session.execute(stmt)).all()
         return Result("select", (total, results))
 
     async def exists(self, login: str) -> Result[bool]:

@@ -21,8 +21,9 @@ def run_api_granian(
         port=settings.port,
         workers=settings.workers if settings.workers != "auto" else workers_count(),
         runtime_threads=settings.threads,
-        log_access=settings.log,
+        log_access=False,
         interface=Interfaces.ASGI,
+        factory=True,
         **kwargs,
     )
     log.info("Running API Granian")

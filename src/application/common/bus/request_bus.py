@@ -1,18 +1,20 @@
 from typing import Any, Callable, Self
 
-from src.application.common.interfaces.usecase import UseCase, UseCaseType
-from src.application.common.mediator.utils import (
+from src.application.common.bus._utils import (
     _create_use_case_factory,
     _predict_dependency_or_raise,
     _resolve_factory,
     _retrieve_use_case_params,
 )
+from src.application.common.interfaces.request_bus import RequestBus
+from src.application.common.interfaces.usecase import UseCase, UseCaseType
+from src.application.common.interfaces.wrapper import RequestWrapper
 from src.application.common.request import Request
 
 type UseCaseLike = Callable[[], UseCaseType] | UseCaseType
 
 
-class MediatorImpl:
+class RequestBusImpl(RequestBus):
     __slots__ = ("_use_cases_registry", "_use_cases_factory", "_dependencies")
 
     def __init__(self) -> None:
@@ -49,12 +51,20 @@ class MediatorImpl:
             use_case, **prepared_deps
         )
 
-    async def send[Q: Request, R](self, request: Q) -> R:
-        use_case: UseCase[Q, R] = self._get_use_case(request)
-        return await use_case(request)
+    async def send[Q: Request, R](self, message: Q) -> R:
+        use_case: UseCase[Q, R] = self._get_use_case(message)
+        return await use_case(message)
 
-    def _get_use_case[Q: Request, R](self, request: Q) -> UseCase[Q, R]:
+    async def send_wrapped[Q: Request, R](
+        self,
+        wrapper: RequestWrapper[Q, R],
+        message: Q,
+    ) -> R:
+        use_case: UseCase[Q, R] = self._get_use_case(message)
+        return await wrapper.execute(use_case, message)
+
+    def _get_use_case[Q: Request, R](self, message: Q) -> UseCase[Q, R]:
         try:
-            return _resolve_factory(self._use_cases_registry[type(request)], UseCase)
+            return _resolve_factory(self._use_cases_registry[type(message)], UseCase)
         except KeyError as e:
-            raise KeyError(f"Use case for `{type(request)}` is not registered") from e
+            raise KeyError(f"Use case for `{type(message)}` is not registered") from e

@@ -1563,14 +1563,14 @@ wheels = [
 
 [[package]]
 name = "sqla-autoloads"
-version = "0.1.5"
+version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/94/47/ce2911f25003e6bb6ee4c5ad211a80abaaf929f48259507ee3fdf9e36f60/sqla_autoloads-0.1.5.tar.gz", hash = "sha256:01c692b13550aaa6718dd70549f79a90098d2bbc483ecffcf5c514faea1c9916", size = 121523 }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/de/7a11b1bc896a73cca125519a184297a8b104733da59a0012832727cb940c/sqla_autoloads-0.1.7.tar.gz", hash = "sha256:da4b3ad9fdea807cc6f4645e7a7962e2a47b450f205dfa845324faac7dc1d92e", size = 124191 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/0a/2741083043fdc226a61b9764776a85144fbae0d44df69834bf6f3594c5ef/sqla_autoloads-0.1.5-py3-none-any.whl", hash = "sha256:ca0ddd4440838515d04551c74e2a6bf6800f15fd77173f23284ea084cfe140a6", size = 21267 },
+    { url = "https://files.pythonhosted.org/packages/da/67/af775818878d1cd4184f16b8a9eb237db6806a549be781540507e5743aaa/sqla_autoloads-0.1.7-py3-none-any.whl", hash = "sha256:c020247c816d4c0547260a09434622910283bc8606bdf599671913703326fa78", size = 23127 },
 ]
 
 [[package]]
@@ -1752,7 +1752,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.13.1,<3" },
     { name = "pyjwt", specifier = ">=2.12.1,<3" },
     { name = "redis", specifier = ">=7.4.0,<8" },
-    { name = "sqla-autoloads", specifier = ">=0.1.5" },
+    { name = "sqla-autoloads", specifier = ">=0.1.6" },
     { name = "sqlalchemy", specifier = ">=2.0.49,<3" },
     { name = "structlog", specifier = ">=24.4.0" },
     { name = "taskiq", specifier = ">=0.12.1" },

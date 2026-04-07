@@ -5,7 +5,7 @@ description: Use when creating or editing a FastAPI endpoint under src/presentat
 
 # Writing HTTP endpoints (`src/presentation/http/v1/endpoints/<audience>/`)
 
-Endpoints are **thin adapters**. They have no business logic, no DB access, no validation beyond schema parsing. Their job is `contract → Request → mediator.send() → OkResponse(contract.from(result))`.
+Endpoints are **thin adapters**. They have no business logic, no DB access, no validation beyond schema parsing. Their job is `contract → Request → request_bus.send() → OkResponse(contract.from(result))`.
 
 ## Pick the audience folder first
 
@@ -31,7 +31,7 @@ from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Query, status
 from fastapi import Depends as Require
 
-from src.application.common.interfaces.mediator import Mediator
+from src.application.common.interfaces.request_bus import RequestBus
 from src.application.common.pagination import OffsetPagination
 from src.application.v1.results import OffsetResult, WidgetResult
 from src.application.v1.usecases.widget import (
@@ -53,7 +53,7 @@ admin_widget_router = APIRouter(
 ### Fixed imports
 
 - `from fastapi import Depends as Require` — the project **always** aliases `Depends` → `Require` to make the intent obvious.
-- `from src.common.di import Depends` — this is **Dishka's** `Depends[T]` marker used for DI, different from FastAPI's `Depends`. Use `Depends[Mediator]` etc. as parameter annotations.
+- `from src.common.di import Depends` — this is **Dishka's** `Depends[T]` marker used for DI, different from FastAPI's `Depends`. Use `Depends[RequestBus]` etc. as parameter annotations.
 - `from dishka.integrations.fastapi import DishkaRoute` — every `APIRouter` passes `route_class=DishkaRoute` so Dishka can inject into endpoints.
 - `tags=["<Audience> | <Resource>"]` — two-word tag with a pipe, e.g. `"Admin | User"`, `"Admin | Widget"`, `"User"`, `"Public"`.
 
@@ -88,7 +88,7 @@ Every list endpoint uses **exactly** this shape — do not deviate, do not reord
     status_code=status.HTTP_200_OK,
 )
 async def select_widgets_endpoint(
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     query: Annotated[contracts.SelectWidgets, Require(contracts.SelectWidgets)],
     pagination: Annotated[
         contracts.OffsetPagination, Require(contracts.OffsetPagination)
@@ -97,7 +97,7 @@ async def select_widgets_endpoint(
         default=(), title="Additional relations"
     ),
 ) -> OkResponse[OffsetResult[contracts.Widget]]:
-    result: OffsetResult[WidgetResult] = await mediator.send(
+    result: OffsetResult[WidgetResult] = await request_bus.send(
         SelectManyWidgetRequest(
             loads=loads,
             **query.model_dump(),
@@ -110,9 +110,9 @@ async def select_widgets_endpoint(
 Five things to notice:
 
 1. **`query: Annotated[ContractCls, Require(ContractCls)]`** — `Require(ContractCls)` tells FastAPI to treat the Pydantic model's fields as **separate query string parameters**. This works for flat primitives (`str | None`, `UUID | None`, `int`, `Literal[...]`). Nested/complex types break — keep filter contracts flat.
-2. **`pagination: Annotated[contracts.OffsetPagination, Require(contracts.OffsetPagination)]`** — same trick for pagination params. `contracts.OffsetPagination` is the **strict** version (`10 ≤ limit ≤ 200`, `offset ≥ 0`). It is **mapped** to the lenient application version on the mediator.send line: `OffsetPagination(**pagination.model_dump())`. In the endpoint module the **unqualified** `OffsetPagination` refers to the application class (imported from `src.application.common.pagination`), and `contracts.OffsetPagination` refers to the strict HTTP contract class — no name collision.
+2. **`pagination: Annotated[contracts.OffsetPagination, Require(contracts.OffsetPagination)]`** — same trick for pagination params. `contracts.OffsetPagination` is the **strict** version (`10 ≤ limit ≤ 200`, `offset ≥ 0`). It is **mapped** to the lenient application version on the request_bus.send line: `OffsetPagination(**pagination.model_dump())`. In the endpoint module the **unqualified** `OffsetPagination` refers to the application class (imported from `src.application.common.pagination`), and `contracts.OffsetPagination` refers to the strict HTTP contract class — no name collision.
 3. **`loads: tuple[WidgetLoads, ...] = Query(default=(), title="...")`** — a **separate** standalone query parameter, not nested inside the filter contract. Lets the frontend opt in to relations per request. Forward as-is to the Request.
-4. **`await mediator.send(SelectManyWidgetRequest(loads=loads, **query.model_dump(), pagination=OffsetPagination(**pagination.model_dump())))`** — flat kwargs from the query contract, pagination mapped, loads forwarded.
+4. **`await request_bus.send(SelectManyWidgetRequest(loads=loads, **query.model_dump(), pagination=OffsetPagination(**pagination.model_dump())))`** — flat kwargs from the query contract, pagination mapped, loads forwarded.
 5. **`result.map(contracts.Widget.model_validate)`** — the generic envelope `.map()` retargets the item type without re-building offset/limit/total manually. `contracts.Widget.model_validate(widget_result)` works because `Contract` uses `from_attributes=True`.
 
 ## Single `GET` / `PATCH` / `POST` shapes
@@ -127,12 +127,12 @@ Five things to notice:
 )
 async def select_widget_endpoint(
     widget_uuid: uuid.UUID,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     loads: tuple[WidgetLoads, ...] = Query(
         default=(), title="Additional relations"
     ),
 ) -> OkResponse[contracts.Widget]:
-    result: WidgetResult = await mediator.send(
+    result: WidgetResult = await request_bus.send(
         SelectWidgetRequest(widget_uuid=widget_uuid, loads=loads)
     )
     return OkResponse(contracts.Widget.model_validate(result))
@@ -148,9 +148,9 @@ async def select_widget_endpoint(
 )
 async def create_widget_endpoint(
     data: contracts.CreateWidget,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
 ) -> OkResponse[contracts.Widget]:
-    result: WidgetResult = await mediator.send(
+    result: WidgetResult = await request_bus.send(
         CreateWidgetRequest(**data.model_dump())
     )
     return OkResponse(contracts.Widget.model_validate(result))
@@ -167,9 +167,9 @@ async def create_widget_endpoint(
 async def update_widget_endpoint(
     widget_uuid: uuid.UUID,
     data: contracts.AdminUpdateWidget,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
 ) -> OkResponse[contracts.Widget]:
-    result: WidgetResult = await mediator.send(
+    result: WidgetResult = await request_bus.send(
         UpdateWidgetRequest(
             widget_uuid=widget_uuid,
             **data.model_dump(exclude_unset=True),
@@ -192,10 +192,10 @@ When the endpoint lives under `user/` audience and operates on **the caller's ow
 )
 async def update_self_endpoint(
     data: contracts.UpdateSelf,                              # ← NO role_uuid, NO active, NO user_uuid
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     user: Annotated[UserResult, Require(Authorization())],   # ← identity from JWT
 ) -> OkResponse[contracts.User]:
-    result: UserResult = await mediator.send(
+    result: UserResult = await request_bus.send(
         UpdateUserRequest(
             user_uuid=user.uuid,                              # ← from guard, never from client
             **data.model_dump(exclude_unset=True),

@@ -33,16 +33,21 @@ Every repository inherits `BaseRepository[models.X]` and accesses CRUD primitive
 ```python
 # src/database/psql/repositories/widget.py
 from collections.abc import Sequence
-from typing import Any, Optional, Unpack
+from typing import Optional, Unpack
 
 import uuid_utils.compat as uuid
-from sqlalchemy import ColumnExpressionArgument, UnaryExpression
+from sqlalchemy import ColumnExpressionArgument
 
 import src.database.psql.models as models
 from src.database.psql.exceptions import InvalidParamsError
 from src.database.psql.repositories import Result
 from src.database.psql.repositories.base import BaseRepository
-from src.database.psql.tools import on_integrity, sqla_select
+from src.database.psql.tools import (
+    on_integrity,
+    sqla_offset_query,
+    sqla_select,
+    unique_scalars,
+)
 from src.database.psql.types import OrderBy
 from src.database.psql.types.widget import (
     CreateWidgetType,
@@ -74,7 +79,9 @@ class WidgetRepository(BaseRepository[models.Widget]):
             where_clauses.append(self.model.name == name)
 
         stmt = sqla_select(model=self.model, loads=loads).where(*where_clauses)
-        return Result("select", (await self._session.scalars(stmt)).unique().first())
+        return Result(
+            "select", unique_scalars(await self._session.execute(stmt)).first()
+        )
 
     @on_integrity("name")
     async def update(
@@ -104,25 +111,23 @@ class WidgetRepository(BaseRepository[models.Widget]):
         limit: Optional[int] = None,
     ) -> Result[tuple[int, Sequence[models.Widget]]]:
         where_clauses: list[ColumnExpressionArgument[bool]] = []
-        order_by_clauses: list[UnaryExpression[Any]] = []
 
         if name:
             where_clauses.append(self.model.name.ilike(f"%{name}%"))
-        if order_by:
-            order_by_clauses.append(getattr(self.model.created_at, order_by)())
 
         total = await self._crud.count(*where_clauses)
         if total <= 0:
             return Result("select", (total, []))
 
-        stmt = (
-            sqla_select(model=self.model, loads=loads)
-            .where(*where_clauses)
-            .order_by(*order_by_clauses)
-            .limit(limit)
-            .offset(offset)
+        stmt = sqla_offset_query(
+            self.model,
+            loads=loads,
+            offset=offset,
+            limit=limit,
+            order=("created_at", order_by),
+            where=where_clauses,
         )
-        results = (await self._session.scalars(stmt)).unique().all()
+        results = unique_scalars(await self._session.execute(stmt)).all()
         return Result("select", (total, results))
 
     async def exists(self, name: str) -> Result[bool]:
@@ -132,12 +137,43 @@ class WidgetRepository(BaseRepository[models.Widget]):
 ## Fixed rules
 
 1. **Always return `Result[T]`** from every public method. The first argument to `Result(...)` is the exception key (`"create" | "select" | "select_many" | "update" | "delete" | "exists" | "count" | "upsert"`) — it determines which domain exception `result.result()` raises on `None`.
-2. **Always use `sqla_select(model=..., loads=loads)`** when you need eager loading — never write raw `select(...).options(selectinload(...))` in a repository.
-3. **Always decorate `create` / `update` / `upsert` with `@on_integrity("unique_col_1", "unique_col_2")`** if the model has unique constraints. This converts SQLAlchemy `IntegrityError` into `ConflictError("<col> already in use")`.
-4. **`select_many` must honour `limit: Optional[int] = None`** — no upper cap, no default limit. The cap is enforced at the contract layer (`presentation/http/v1/contracts/pagination.py` — 200 max). Internal callers (use cases, tasks) can pass `limit=None` for "all rows". `select_many` also returns `(total, rows)` — total is always computed via `self._crud.count(*where_clauses)` **before** the rows query, and if `total <= 0` return early with an empty sequence.
-5. **Raise `InvalidParamsError` when no identifier is provided** on `select` / `delete` / `update` with optional filters — mirrors `UserRepository` / `RoleRepository`.
-6. **`__slots__ = ()`** on every repository subclass.
-7. **Filter arg names are specific**: `widget_uuid` not `id`, `login` not `email`, `role_uuid` not `role`. The `uuid_utils.compat.UUID` type is imported as `import uuid_utils.compat as uuid` and typed as `uuid.UUID`.
+2. **Always use `sqla_select(model=..., loads=loads)`** for single-row reads with eager loading and **`sqla_offset_query(model, loads=loads, offset=..., limit=..., order=(col, dir), where=...)`** for paginated reads. Both come from `src.database.psql.tools` (re-exported from `sqla-autoloads`). Never write raw `select(...).options(selectinload(...))` in a repository, and never apply `.limit()/.offset()` directly to a `sqla_select` query — the library helper handles pagination correctly via a CTE on the primary key so eager-loading joins operate only on the page slice.
+3. **Always materialise results via `unique_scalars(...)`** (also re-exported from `src.database.psql.tools`). It returns a `ScalarResult` so you can chain `.first()` for single rows or `.all()` for collections. This deduplicates rows produced by outer-join eager loading — never call `.unique().scalars()` by hand.
+4. **Always decorate `create` / `update` / `upsert` with `@on_integrity("unique_col_1", "unique_col_2")`** if the model has unique constraints. This converts SQLAlchemy `IntegrityError` into `ConflictError("<col> already in use")`.
+5. **`select_many` must honour `limit: Optional[int] = None`** — no upper cap, no default limit. The cap is enforced at the contract layer (`presentation/http/v1/contracts/pagination.py` — 200 max). Internal callers (use cases, tasks) can pass `limit=None` for "all rows". `select_many` also returns `(total, rows)` — total is always computed via `self._crud.count(*where_clauses)` **before** the rows query, and if `total <= 0` return early with an empty sequence.
+6. **Raise `InvalidParamsError` when no identifier is provided** on `select` / `delete` / `update` with optional filters — mirrors `UserRepository` / `RoleRepository`.
+7. **`__slots__ = ()`** on every repository subclass.
+8. **Filter arg names are specific**: `widget_uuid` not `id`, `login` not `email`, `role_uuid` not `role`. The `uuid_utils.compat.UUID` type is imported as `import uuid_utils.compat as uuid` and typed as `uuid.UUID`.
+
+## sqla-autoloads helpers
+
+`src/database/psql/tools.py` re-exports the library's query API so repositories never import from `sqla_autoloads` directly:
+
+| Helper | Use for |
+|---|---|
+| `sqla_select(model=..., loads=...)` | single-row reads with eager loading; chain `.where(...)` for filters |
+| `sqla_offset_query(model, *, loads, offset, limit, order=(col, dir), where=[...])` | paginated list reads — builds a CTE on the PK so the page slice is computed before joins, avoiding row multiplication from eager loads |
+| `sqla_cursor_query(model, *, loads, limit, after=None, before=None, order=(col, dir), where=[...])` | cursor-based pagination (forward via `after`, backward via `before`); fetches `limit + 1` rows so the caller can detect a next page |
+| `unique_scalars(result)` | shorthand for `result.unique().scalars()`; returns a `ScalarResult` — chain `.first()` or `.all()` |
+| `add_conditions(*exprs)` | build a per-relationship WHERE callable to pass into `sqla_select(conditions={...})` |
+
+`order` is a `(column_name, "asc" | "desc")` tuple — pass `order=("created_at", order_by)` to sort by a domain column. `where` accepts the same `ColumnExpressionArgument[bool]` list that you would build by hand.
+
+When pagination needs cursors (e.g. a feed), use `sqla_cursor_query` instead of `sqla_offset_query` and reverse the result list when `before` is set:
+
+```python
+stmt = sqla_cursor_query(
+    self.model,
+    loads=loads,
+    limit=limit,
+    after=after,
+    order=("created_at", order_by),
+    where=where_clauses,
+)
+rows = unique_scalars(await self._session.execute(stmt)).all()
+has_next = len(rows) > limit
+items = rows[:limit]
+```
 
 ## Types & loads (required companion files)
 

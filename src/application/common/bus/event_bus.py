@@ -2,19 +2,17 @@ from typing import Self, cast, get_args
 
 from src.application.common.events.base import Event
 from src.application.common.interfaces.broker import BrokerType
+from src.application.common.interfaces.event_bus import EventBus
+from src.application.common.interfaces.wrapper import EventWrapper
 from src.common.tools.types import is_typevar
 
 
-class EventBusImpl:
+class EventBusImpl(EventBus):
     __slots__ = ("_brokers_registry", "_brokers")
 
     def __init__(self) -> None:
         self._brokers_registry: dict[type[Event], BrokerType] = {}
         self._brokers: set[BrokerType] = set()
-
-    async def publish(self, event: Event) -> None:
-        broker = self._resolve_broker(event)
-        await broker.publish(broker.build_message(event))
 
     @classmethod
     def builder(cls) -> Self:
@@ -28,6 +26,18 @@ class EventBusImpl:
         for broker in self._brokers:
             self._brokers_registry[self._resolve_event(broker)] = broker
         return self
+
+    async def send(self, message: Event) -> None:
+        broker = self._resolve_broker(message)
+        await broker.publish(broker.build_message(message))
+
+    async def send_wrapped(
+        self,
+        wrapper: EventWrapper,
+        message: Event,
+    ) -> None:
+        broker = self._resolve_broker(message)
+        await wrapper.execute(broker, message)
 
     def _resolve_broker(self, event: Event) -> BrokerType:
         event_subclasses = Event.__subclasses__()

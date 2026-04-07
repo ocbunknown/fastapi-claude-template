@@ -1,11 +1,11 @@
 ---
 name: usecase
-description: Use when creating or editing a use case under src/application/v1/usecases/. Enforces the Mediator + UseCase pattern (Request + UseCase in one file, @dataclass(slots=True), returns Result type) and the DBGateway transaction rules — never open two sessions in one use case, never touch self.database outside a context manager, never lazy-load relationships outside the session.
+description: Use when creating or editing a use case under src/application/v1/usecases/. Enforces the RequestBus + UseCase pattern (Request + UseCase in one file, @dataclass(slots=True), returns Result type) and the DBGateway transaction rules — never open two sessions in one use case, never touch self.database outside a context manager, never lazy-load relationships outside the session.
 ---
 
 # Writing use cases (`src/application/v1/usecases/<domain>/`)
 
-A use case is the **transport-agnostic unit of business logic**. Endpoints, consumers, and scheduled tasks all call `mediator.send(Request(...))` and get back a `Result`. Use cases never know who called them.
+A use case is the **transport-agnostic unit of business logic**. Endpoints, consumers, and scheduled tasks all call `request_bus.send(Request(...))` and get back a `Result`. Use cases never know who called them.
 
 ## One file, two classes
 
@@ -49,11 +49,11 @@ class CreateWidgetUseCase(UseCase[CreateWidgetRequest, WidgetResult]):
 
 1. **`Request`** inherits `src.application.common.request.Request` (Pydantic, `frozen=True`). Validation via `Annotated[..., Field(...)]`. Do not reuse HTTP `Contract` classes here — the Request describes the use-case input, not the HTTP input.
 2. **`UseCase`** inherits `UseCase[RequestClass, ReturnType]`. The base class auto-applies `@dataclass(slots=True)` — add your own `@dataclass(slots=True)` on the subclass too for mypy/readability.
-3. **Dependencies are dataclass fields**: `database: DBGateway`, `hasher: Hasher`, `cache: StrCache`, `services: ServiceGateway`, etc. Injected by Dishka via the mediator — do not instantiate manually.
+3. **Dependencies are dataclass fields**: `database: DBGateway`, `hasher: Hasher`, `cache: StrCache`, `services: ServiceGateway`, etc. Injected by Dishka via the request bus — do not instantiate manually.
 4. **Returns a `Result` subclass** from `src/application/v1/results/` — never a `Contract` from `presentation/`, never a bare ORM model, never a dict.
 5. **Register** the use case in `src/application/v1/usecases/__init__.py::setup_use_cases()`:
    ```python
-   mediator.register(widget.CreateWidgetRequest, widget.CreateWidgetUseCase)
+   request_bus.register(widget.CreateWidgetRequest, widget.CreateWidgetUseCase)
    ```
 6. **Re-export** from `src/application/v1/usecases/widget/__init__.py` so the presentation/consumers layer can import `from src.application.v1.usecases.widget import CreateWidgetRequest`.
 

@@ -2,12 +2,12 @@ from typing import Callable
 
 from dishka import Provider, Scope, provide
 
+from src.application.common.bus import RequestBusImpl
 from src.application.common.interfaces.cache import StrCache
 from src.application.common.interfaces.event_bus import EventBus
 from src.application.common.interfaces.hasher import Hasher
 from src.application.common.interfaces.jwt import JWT
-from src.application.common.interfaces.mediator import Mediator
-from src.application.common.mediator import MediatorImpl
+from src.application.common.interfaces.request_bus import RequestBus
 from src.application.v1.services import AuthService, ServiceGateway
 from src.application.v1.usecases import setup_use_cases
 from src.database.psql import DBGateway
@@ -27,16 +27,16 @@ class ApplicationProvider(Provider):
         return ServiceGateway(auth=auth)
 
     @provide
-    def mediator(
+    def request_bus(
         self,
         hasher: Hasher,
         cache: StrCache,
         services: ServiceGateway,
         database_factory: DatabaseFactory,
         event_bus: EventBus,
-    ) -> Mediator:
+    ) -> RequestBus:
         return (
-            MediatorImpl.builder()
+            RequestBusImpl.builder()
             .dependencies(
                 hasher=hasher,
                 cache=cache,

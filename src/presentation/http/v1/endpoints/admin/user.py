@@ -5,7 +5,7 @@ from dishka.integrations.fastapi import DishkaRoute
 from fastapi import APIRouter, Query, status
 from fastapi import Depends as Require
 
-from src.application.common.interfaces.mediator import Mediator
+from src.application.common.interfaces.request_bus import RequestBus
 from src.application.common.pagination import OffsetPagination
 from src.application.v1.results import OffsetResult, UserResult
 from src.application.v1.usecases.user import (
@@ -29,14 +29,14 @@ admin_user_router = APIRouter(
     status_code=status.HTTP_200_OK,
 )
 async def select_users_endpoint(
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     query: Annotated[contracts.SelectUsers, Require(contracts.SelectUsers)],
     pagination: Annotated[
         contracts.OffsetPagination, Require(contracts.OffsetPagination)
     ],
     loads: tuple[UserLoads, ...] = Query(default=(), title="Additional relations"),
 ) -> OkResponse[OffsetResult[contracts.User]]:
-    result: OffsetResult[UserResult] = await mediator.send(
+    result: OffsetResult[UserResult] = await request_bus.send(
         SelectManyUserRequest(
             loads=loads,
             **query.model_dump(),
@@ -53,10 +53,10 @@ async def select_users_endpoint(
 )
 async def select_user_endpoint(
     user_uuid: uuid.UUID,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     loads: tuple[UserLoads, ...] = Query(default=(), title="Additional relations"),
 ) -> OkResponse[contracts.User]:
-    result: UserResult = await mediator.send(
+    result: UserResult = await request_bus.send(
         SelectUserRequest(user_uuid=user_uuid, loads=loads)
     )
     return OkResponse(contracts.User.model_validate(result))
@@ -70,9 +70,9 @@ async def select_user_endpoint(
 async def update_user_endpoint(
     user_uuid: uuid.UUID,
     body: contracts.AdminUpdateUser,
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
 ) -> OkResponse[contracts.User]:
-    result: UserResult = await mediator.send(
+    result: UserResult = await request_bus.send(
         UpdateUserRequest(
             user_uuid=user_uuid,
             **body.model_dump(exclude_unset=True),

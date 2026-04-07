@@ -5,7 +5,7 @@ from fastapi.security.base import SecurityBase
 from fastapi.security.utils import get_authorization_scheme_param
 
 from src.application.common.exceptions import UnAuthorizedError
-from src.application.common.interfaces.mediator import Mediator
+from src.application.common.interfaces.request_bus import RequestBus
 from src.application.v1.results import UserResult
 from src.application.v1.usecases.auth import PermissionRequest
 from src.common.di import Depends
@@ -26,10 +26,10 @@ class Authorization(SecurityBase):
     async def __call__(
         self,
         request: Request,
-        mediator: Depends[Mediator],
+        request_bus: Depends[RequestBus],
     ) -> UserResult:
         token = self._extract_bearer(request)
-        return await mediator.send(
+        return await request_bus.send(
             PermissionRequest(access_token=token, permissions=self._roles)
         )
 

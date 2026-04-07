@@ -19,7 +19,7 @@ Every "why didn't the tests catch this" answer has the same root: **the scenario
 |---|---|---|---|
 | `tests/unit/` | Pure logic: use cases, validators, helpers, contracts | `MagicMock`/`AsyncMock` DBGateway, `FakeHasher`, `FakeJWT`, `FakeStrCache` from `tests/fakes.py` | < 2s for the whole folder |
 | `tests/integration/` | Real I/O: repositories against Postgres, Redis adapters, NATS brokers | Session-scoped `testcontainers` (Postgres/Redis/NATS), per-test outer-transaction rollback | 3–10s |
-| `tests/e2e/` | Full HTTP stack: endpoint → contract → mediator → use case → repo → DB | Real app wired via Dishka, `httpx.AsyncClient` + `ASGITransport` | 5–15s |
+| `tests/e2e/` | Full HTTP stack: endpoint → contract → request bus → use case → repo → DB | Real app wired via Dishka, `httpx.AsyncClient` + `ASGITransport` | 5–15s |
 
 **Hard rules:**
 - **Unit tests never touch I/O.** No `await database.X.create(...)` against a real DB — that's integration.

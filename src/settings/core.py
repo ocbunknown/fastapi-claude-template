@@ -79,6 +79,7 @@ class RedisSettings(BaseSettings):
         case_sensitive=False,
         env_prefix="REDIS_",
         extra="ignore",
+        env_file="./.env",
     )
 
     host: str = "127.0.0.1"
@@ -91,6 +92,7 @@ class ServerSettings(BaseSettings):
         case_sensitive=False,
         env_prefix="SERVER_",
         extra="ignore",
+        env_file="./.env",
     )
 
     methods: list[
@@ -113,7 +115,6 @@ class ServerSettings(BaseSettings):
     port: int = 8080
     workers: int | Literal["auto"] = "auto"
     threads: int = 1
-    log: bool = False
 
 
 class CipherSettings(BaseSettings):

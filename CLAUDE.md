@@ -6,9 +6,8 @@
 src/
 ├── application/          ← USE CASES (transport-agnostic business logic)
 │   ├── common/
-│   │   ├── interfaces/   ← ports: usecase, mediator, cache, hasher, jwt, event_bus, broker
-│   │   ├── mediator/     ← MediatorImpl
-│   │   ├── bus/          ← EventBusImpl
+│   │   ├── interfaces/   ← ports: bus, request_bus, event_bus, wrapper, usecase, cache, hasher, jwt, broker
+│   │   ├── bus/          ← RequestBusImpl, EventBusImpl (both inherit Bus[M])
 │   │   ├── events/       ← Event base, BrokerEvent, StreamEvent, @event decorator
 │   │   ├── pagination.py ← OffsetPagination (lenient, internal)
 │   │   ├── exceptions.py ← AppException + DetailedError hierarchy
@@ -24,20 +23,25 @@ src/
 ├── infrastructure/       ← OUTBOUND ADAPTERS (accessed through ports)
 │   ├── cache/            ← Redis adapter (implements StrCache port)
 │   ├── security/         ← JWT, Argon2 (implement JWT, Hasher ports)
-│   ├── http/             ← aiohttp wrapper + Client/Request base
+│   ├── http/             ← HTTP client stack
+│   │   ├── clients/      ← Client + Request base classes (provider-agnostic)
+│   │   └── provider/     ← AsyncProvider Protocol + AiohttpProvider + middleware chain
 │   ├── broker/nats/      ← NatsBroker, NatsJetStreamBroker
 │   ├── logging/          ← setup_logging
 │   └── provider.py       ← InfrastructureProvider (Dishka)
 │
 ├── database/             ← PERSISTENCE — first-class layer (see "Persistence")
-│   ├── models/           ← SQLAlchemy ORM models (inherit Base with .as_dict())
-│   ├── repositories/     ← repository implementations
-│   ├── queries/          ← Query Object pattern (complex SQL builders)
-│   ├── types/            ← OrderBy, Loads literals, TypedDict payloads
-│   ├── manager.py        ← TransactionManager
-│   ├── connection.py     ← engine + session factory
-│   ├── tools.py          ← on_integrity decorator, sqla_select
-│   └── provider.py       ← DatabaseProvider (Dishka)
+│   └── psql/             ← SQLAlchemy + Postgres (the only backend)
+│       ├── models/       ← ORM models (inherit Base with .as_dict())
+│       ├── repositories/ ← repository implementations (BaseRepository + CRUD helper)
+│       ├── queries/      ← Query Object pattern (complex SQL builders)
+│       ├── types/        ← OrderBy, Loads literals, TypedDict payloads
+│       ├── interfaces/   ← internal ports (DBGateway, CRUD)
+│       ├── manager.py    ← TransactionManager
+│       ├── connection.py ← engine + session factory
+│       ├── exceptions.py ← integrity-error translation to AppException
+│       ├── tools.py      ← on_integrity decorator + sqla-autoloads re-exports (sqla_select, sqla_offset_query, sqla_cursor_query, unique_scalars, add_conditions)
+│       └── provider.py   ← DatabaseProvider (Dishka)
 │
 ├── presentation/         ← INBOUND ADAPTERS — synchronous client interface
 │   └── http/             ← FastAPI HTTP transport
@@ -52,13 +56,13 @@ src/
 │               └── internal/       service-to-service stub (include_in_schema=False)
 │
 ├── consumers/            ← INBOUND ADAPTERS — message-driven (FastStream)
-│   ├── routers/          ← @subscriber-decorated functions calling mediator
+│   ├── routers/          ← @subscriber-decorated functions calling request_bus
 │   ├── subjects.py       ← NATS subject constants
 │   └── streams.py        ← NATS JetStream stream constants
 │
 ├── tasks/                ← INBOUND ADAPTERS — time-driven (Taskiq)
 │   ├── broker.py         ← Taskiq broker + scheduler factories
-│   └── *.py              ← scheduled task functions calling mediator
+│   └── *.py              ← scheduled task functions calling request_bus
 │
 ├── entrypoints/          ← composition root + module-level app instances
 │   ├── container.py      ← build_container() — shared across all transports
@@ -105,11 +109,11 @@ Dependencies point **inward** — outer layers depend on inner layers, never rev
 
 ## Persistence — `database/` as a first-class layer
 
-`database/` is a **top-level layer**, not part of `infrastructure/`. It's a shared kernel for persistence vocabulary — `application/` use cases import `DBGateway`, repository types, `Loads` literals, `Roles` enum, TypedDicts, and Query Objects directly. This is **the only allowed inner→outer-style import in the project**.
+`database/` is a **top-level layer**, not part of `infrastructure/`. It's a shared kernel for persistence vocabulary — `application/` use cases import `DBGateway`, repository types, `Loads` literals, the `Roles` type alias (`Literal["Admin", "User"]`), TypedDicts, and Query Objects directly. This is **the only allowed inner→outer-style import in the project**.
 
 **Why:** persistence vocabulary (Loads, OrderBy, Create/Update payloads) describes the data model. Mirroring it in `application/` would double maintenance cost. Repository methods are tightly coupled to ORM features (eager loading, CTE, subqueries) — wrapping in Protocols loses type info without gaining swappability we don't need. SQLAlchemy + Postgres is a chosen, stable foundation.
 
-**Scope:** the exception covers **only** `database/`. All other infrastructure (cache, security, broker, http clients, logging) **must** be accessed through Protocols defined in `application/common/interfaces/`. Domain events, exceptions, results are defined in `application/` — database conforms to them.
+**Scope:** the exception covers **only** `database/`. All other infrastructure (cache, security, broker, http clients, logging) **must** be accessed through Protocols defined in `application/common/interfaces/`. The only import `database/` takes from `application/` is `application.common.exceptions` — `tools.on_integrity` translates `IntegrityError` into `ConflictError`/`AppException` so repositories can raise domain-typed errors. Domain events and Results live entirely inside `application/` and are never touched by `database/`.
 
 Repository methods return ORM models. Use cases map them to Results via `{Entity}Result(**orm.as_dict())` — see "Mapping ORM → Result" below.
 
@@ -227,10 +231,10 @@ def setup_admin_router() -> APIRouter:
 
 ```python
 async def get_me_endpoint(
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     user: Annotated[UserResult, Require(Authorization())],   # cached, no double work
 ) -> OkResponse[contracts.User]:
-    result = await mediator.send(SelectUserRequest(user_uuid=user.uuid, loads=("role",)))
+    result = await request_bus.send(SelectUserRequest(user_uuid=user.uuid, loads=("role",)))
     return OkResponse(contracts.User.model_validate(result))
 ```
 
@@ -280,14 +284,14 @@ The presentation contract uses **plural** (`SelectUsers`) — the HTTP shape fro
     status_code=status.HTTP_200_OK,
 )
 async def select_users_endpoint(
-    mediator: Depends[Mediator],
+    request_bus: Depends[RequestBus],
     query: Annotated[contracts.SelectUsers, Require(contracts.SelectUsers)],
     pagination: Annotated[
         contracts.OffsetPagination, Require(contracts.OffsetPagination)
     ],
     loads: tuple[UserLoads, ...] = Query(default=(), title="Additional relations"),
 ) -> OkResponse[OffsetResult[contracts.User]]:
-    result: OffsetResult[UserResult] = await mediator.send(
+    result: OffsetResult[UserResult] = await request_bus.send(
         SelectManyUserRequest(
             loads=loads,
             **query.model_dump(),
@@ -339,19 +343,33 @@ return OkResponse(result.map(contracts.User.model_validate))
 5. **Endpoint:** five-parameter shape above. Tag `["<Audience> | <Entity>"]`. `response_model=OffsetResult[contracts.{Entity}]`.
 6. **Tests:** unit (use case + mocks: kwargs forwarding, `limit=None` propagation, defaults), integration (repo `limit=None` returns all, finite `limit` caps, filter passes through), e2e (envelope shape, `loads` opt-in, strict validation returns **400** — project converts `RequestValidationError` to 400, not FastAPI default 422, unauthorized → 401).
 
-## Mediator + UseCase pattern
+## RequestBus + UseCase pattern
 
-All business operations go through the Mediator. Endpoints, subscribers, and tasks never contain business logic — they translate transport input into a `Request` and call `mediator.send(request)`.
+All business operations go through the `RequestBus`. Endpoints, subscribers, and tasks never contain business logic — they translate transport input into a `Request` and call `request_bus.send(request)`. The same bus is used by every transport (HTTP, consumers, tasks), which keeps use cases completely transport-agnostic.
 
-**Naming:** the project uses **UseCase** (Clean Architecture) not **Handler** (CQRS) because there's no Command/Query split. The Mediator is kept for uniform multi-transport dispatch (HTTP, consumers, tasks all call `mediator.send()`).
+**Bus protocol family (`application/common/interfaces/`):**
+- **`Bus[M]`** (`bus.py`) — common parent Protocol with `send(message: M)`.
+- **`RequestBus(Bus[Request])`** (`request_bus.py`) — in-process 1→1 request/response. Has `send` + `send_wrapped`.
+- **`EventBus(Bus[Event])`** (`event_bus.py`) — 1→N pub/sub via brokers (NATS), fire-and-forget. Has `send` + `send_wrapped`.
+
+**Wrapper protocols (`application/common/interfaces/wrapper.py`):**
+
+Cross-cutting decorators around the unit of work — kept in their own port file because they are an independent abstraction the buses *use*, not part of the bus contract itself.
+
+- **`RequestWrapper[Q: Request, R]`** — `execute(use_case, message) -> R`. Implemented by `ResponseCache`, retry/metrics/idempotency wrappers, etc.
+- **`EventWrapper`** — `execute(broker, message) -> None`. For outbox / retry / tracing on event publishing.
+
+Each wrapper uses a **domain-specific parameter name** (`use_case` or `broker`) rather than a generic `handler`, so the wrapper contract reads truthfully for its bus.
+
+**`Request` is the use case's input, not an HTTP request.** It is a transport-agnostic Pydantic model describing what the use case needs. HTTP-shape lives separately in `presentation/http/v1/contracts/` under entity/action names (`Login`, `Register`, `User`, etc.). Do not import `fastapi.Request` and `application.common.request.Request` in the same module.
 
 **UseCase rules:**
 1. Inherits `UseCase[Q, R]` where `Q: Request`, `R` is the return type (a `Result` subclass).
 2. `@dataclass(slots=True)` — auto-applied by base class, add explicitly for mypy.
-3. Dependencies are constructor fields injected by the mediator (`database: DBGateway`, `hasher: Hasher`, etc.).
+3. Dependencies are constructor fields injected by the request bus (`database: DBGateway`, `hasher: Hasher`, etc.).
 4. `async def __call__(self, request: Q) -> R` — one use case per file, `Request` class in the same file.
 5. Returns a `Result` subclass from `application/v1/results/` — never a `Contract`, never a bare ORM row, never a dict.
-6. Registered in `application/v1/usecases/__init__.py::setup_use_cases()`.
+6. Registered in `application/v1/usecases/__init__.py::setup_use_cases()` via `request_bus.register(...)`.
 
 **Request rules:** inherits `src.application.common.request.Request` (Pydantic, `frozen=True`). Defined in the same file as its use case. Contains only the fields the use case needs — independent of HTTP/MQ contracts. Validation via Pydantic `Field(...)` constraints.
 
@@ -363,7 +381,36 @@ All business operations go through the Mediator. Endpoints, subscribers, and tas
 - Result types are reused across use cases that return the same shape.
 - `OffsetResult[T]` is layer-agnostic — defined once in `application/v1/results/base.py` and reused as both use case return type and HTTP response type.
 
-**Inbound adapter rules (endpoints / subscribers / tasks):** all three are **thin adapters** — no business logic, no DB access, no validation beyond schema parsing. They translate transport input into a `Request` and call `mediator.send()`. HTTP endpoints wrap the result: `OkResponse(contracts.X.model_validate(result))` (single) or `OkResponse(result.map(contracts.X.model_validate))` (list).
+**Inbound adapter rules (endpoints / subscribers / tasks):** all three are **thin adapters** — no business logic, no DB access, no validation beyond schema parsing. They translate transport input into a `Request` and call `request_bus.send()`. HTTP endpoints wrap the result: `OkResponse(contracts.X.model_validate(result))` (single) or `OkResponse(result.map(contracts.X.model_validate))` (list).
+
+### `send` vs `send_wrapped`
+
+Both buses expose two dispatch methods:
+
+- **`send(message)`** — direct dispatch: bus resolves the target (use case / broker) by message type and invokes it. Use this for the default path.
+- **`send_wrapped(wrapper, message)`** — wrapped dispatch: bus resolves the target and hands it to a domain-specific wrapper (`RequestWrapper` or `EventWrapper`), which decides *how* to execute (cache, retry, metrics, outbox, dedup, etc.). The wrapper is **bus-agnostic** — it only sees `(use_case, message)` for `RequestBus` or `(broker, message)` for `EventBus`, never the bus itself.
+
+Example — caching an HTTP endpoint via `ResponseCache` wrapper:
+
+```python
+async def get_me_endpoint(
+    request_bus: Depends[RequestBus],
+    cache: Annotated[
+        ResponseCache,
+        Require(ResponseCache(expires_in=timedelta(seconds=30), key="user:{user_uuid}"))
+    ],
+    user: Annotated[UserResult, Require(Authorization())],
+) -> OkResponse[contracts.User]:
+    result = await request_bus.send_wrapped(
+        cache,
+        SelectUserRequest(user_uuid=user.uuid, loads=("role",)),
+    )
+    return OkResponse(contracts.User.model_validate(result))
+```
+
+The endpoint chooses `send` or `send_wrapped` per call. Wrapper implementations live in `presentation/http/common/wrapper/` and satisfy the `RequestWrapper[Q, R]` Protocol structurally — no explicit subclassing required.
+
+`EventBus.send_wrapped` exists symmetrically (`EventWrapper` with `execute(broker, message)`) for event-level cross-cutting concerns (outbox, retry, tracing), even if no such wrappers exist yet.
 
 ## DI composition
 
@@ -407,7 +454,7 @@ All business operations go through the Mediator. Endpoints, subscribers, and tas
 6. `application/v1/usecases/{domain}/` — Request + UseCase in one file; map ORM → Result via `{Entity}Result(**orm.as_dict())`; pick the right `async with` pattern
 7. `application/v1/usecases/__init__.py::setup_use_cases()` — register
 8. `presentation/http/v1/contracts/` — request/response models; for list endpoints add `Select{Entities}` filter Contract
-9. `presentation/http/v1/endpoints/<audience>/` — pick the audience folder; endpoint maps `Request` → `mediator.send()` → `OkResponse(contracts.X.model_validate(result))` (single) or `OkResponse(result.map(contracts.X.model_validate))` (list)
+9. `presentation/http/v1/endpoints/<audience>/` — pick the audience folder; endpoint maps `Request` → `request_bus.send()` (or `request_bus.send_wrapped(wrapper, ...)` for cached/wrapped dispatch) → `OkResponse(contracts.X.model_validate(result))` (single) or `OkResponse(result.map(contracts.X.model_validate))` (list)
 10. `tests/` — unit + integration + e2e
 
 For consumers / scheduled tasks, replace step 8-9 with a subscriber/task wrapper in `consumers/` or `tasks/`.
