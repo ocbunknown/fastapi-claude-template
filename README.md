@@ -10,11 +10,11 @@ A batteries-included starting point for building async Python services. Ships wi
 
 - **Clean Architecture + Hexagonal** — strict inward dependencies (`application/` → `database/` is the only documented exception). The full ruleset lives in [`CLAUDE.md`](./CLAUDE.md).
 - **Three transports, one composition root** — HTTP (`FastAPI` + `Granian`), message consumers (`FastStream` over NATS), scheduled jobs (`Taskiq` over NATS JetStream). All share the same Dishka container built by `entrypoints/container.py`.
-- **Mediator + UseCase pattern** — every transport translates input into a `Request`, calls `mediator.send()`, and unwraps a `Result`. Zero business logic in endpoints/subscribers/tasks.
+- **RequestBus + UseCase pattern** — every transport translates input into a `Request`, calls `request_bus.send()`, and unwraps a `Result`. Zero business logic in endpoints/subscribers/tasks. Paired with an `EventBus` for fire-and-forget domain events, both inheriting a shared `Bus[M]` Protocol.
 - **Audience-first HTTP routing** — endpoints grouped by who can call them (`public/`, `user/`, `admin/`, `internal/`). Auth is wired once at the router level; it's structurally impossible to forget on individual endpoints.
 - **Strict/lenient pagination split** — HTTP contract enforces `10 ≤ limit ≤ 200`; internal callers can request unbounded fetches via `limit=None`.
 - **Layered testing** — unit (mocks only), integration (`testcontainers` Postgres/Redis/NATS), e2e (full HTTP stack via `httpx.AsyncClient` + `ASGITransport`).
-- **Claude Code native** — custom skills for `usecase` / `endpoint` / `repository` / `migration`, pre-commit hooks that block layer violations and protected-path edits, an architecture review agent, and a 417-line `CLAUDE.md` that's the authoritative spec.
+- **Claude Code native** — custom skills for `usecase` / `endpoint` / `repository` / `migration` / `tests` / `api-client`, pre-commit hooks that block layer violations and protected-path edits, an architecture review agent, and a `CLAUDE.md` that's the authoritative spec.
 
 ---
 
@@ -46,7 +46,7 @@ uv sync
 ### 2. Start dependencies (Postgres, Redis, NATS)
 
 ```bash
-make docker_dev_up
+make docker-dev-up
 ```
 
 ### 3. Configure `.env`
@@ -54,10 +54,10 @@ make docker_dev_up
 Copy the example settings and fill in cipher keys / DB credentials (see `src/settings/core.py` for all fields):
 
 ```bash
-cp .env.example .env   # if you have one; otherwise create .env manually
+cp .env.example .env
 ```
 
-Required keys: `DB_*`, `REDIS_*`, `NATS_*`, `CIPHER_*` (algorithm + secret_key + token TTLs).
+Required keys: `DB_*`, `REDIS_*`, `NATS_*`, `CIPHER_*` (`ALGORITHM`, `SECRET_KEY`, `PUBLIC_KEY` — for HS256 set `SECRET_KEY == PUBLIC_KEY`, `ACCESS_TOKEN_EXPIRE_SECONDS`, `REFRESH_TOKEN_EXPIRE_SECONDS`).
 
 ### 4. Run migrations
 
@@ -69,14 +69,16 @@ make upgrade
 
 ```bash
 # HTTP API (FastAPI + Granian)
-uv run python -m src
+make run-http
+# or: uv run python -m src.entrypoints.http
 
 # Message consumer (FastStream over NATS)
-uv run faststream run src.entrypoints.consumers:app
+make run-consumers
+# or: uv run faststream run src.entrypoints.consumers:app
 
 # Scheduler (Taskiq)
-uv run taskiq worker src.entrypoints.tasks:broker
-uv run taskiq scheduler src.entrypoints.tasks:scheduler
+make run-worker       # uv run taskiq worker src.entrypoints.tasks:broker
+make run-scheduler    # uv run taskiq scheduler src.entrypoints.tasks:scheduler
 ```
 
 Each transport has its own entry point under `src/entrypoints/` and all three share the same Dishka container built by `entrypoints/container.py::build_container(settings, *extras)`.
@@ -88,7 +90,7 @@ Each transport has its own entry point under `src/entrypoints/` and all three sh
 ```
 src/
 ├── application/       USE CASES — transport-agnostic business logic
-│   ├── common/        ports (Hasher, Cache, JWT, EventBus, Broker), mediator, exceptions, Request base, OffsetPagination
+│   ├── common/        ports (Hasher, Cache, JWT, Bus, RequestBus, EventBus, Broker), bus implementations, exceptions, Request base, OffsetPagination
 │   └── v1/            usecases, services, results, events, constants
 │
 ├── infrastructure/    OUTBOUND ADAPTERS — Redis, Argon2, PyJWT, aiohttp, NATS brokers, logging
@@ -145,11 +147,12 @@ Custom skills that kick in when Claude is working on a specific kind of file. Ea
 
 | Skill | Triggers when… | Enforces |
 |---|---|---|
-| **`usecase`** | editing `src/application/v1/usecases/` | Mediator + UseCase pattern, `@dataclass(slots=True)`, `Request` in the same file, `DBGateway` transaction rules (pattern 1/2/3), `{Entity}Result(**orm.as_dict())` over `model_validate(orm)`, the list-endpoint shape for `select_many` use cases |
-| **`endpoint`** | editing `src/presentation/http/v1/endpoints/<audience>/` | audience-first organization, the **five-parameter list shape** (`mediator / query / pagination / loads / return`), parameter naming (`query` for GET filters, `data` for POST/PATCH/PUT bodies), strict contract ↔ Result mapping, privileged-field lockdown between `UpdateSelf` vs `AdminUpdateX` contracts |
-| **`repository`** | editing `src/database/psql/repositories/` | the fixed CRUD verb vocabulary (`create`, `select`, `select_many`, `update`, `delete`, `exists`, `count`, `upsert` — no invented names like `find_one` or `save`), `@on_integrity` for unique constraints, `sqla_select` for eager loading, `Result[T]` return wrapping, `limit: Optional[int] = None` for unbounded internal callers |
+| **`usecase`** | editing `src/application/v1/usecases/` | RequestBus + UseCase pattern, `@dataclass(slots=True)`, `Request` in the same file, `DBGateway` transaction rules (pattern 1/2/3), `{Entity}Result(**orm.as_dict())` over `model_validate(orm)`, the list-endpoint shape for `select_many` use cases |
+| **`endpoint`** | editing `src/presentation/http/v1/endpoints/<audience>/` | audience-first organization, the **five-parameter list shape** (`request_bus / query / pagination / loads / return`), parameter naming (`query` for GET filters, `data` for POST/PATCH/PUT bodies), strict contract ↔ Result mapping, privileged-field lockdown between `UpdateSelf` vs `AdminUpdateX` contracts |
+| **`repository`** | editing `src/database/psql/repositories/` | the fixed CRUD verb vocabulary (`create`, `select`, `select_many`, `update`, `delete`, `exists`, `count`, `upsert` — no invented names like `find_one` or `save`), `@on_integrity` for unique constraints, `sqla_select` for single-row eager loading, `sqla_offset_query` / `sqla_cursor_query` for paginated reads, `unique_scalars(...).first()/.all()` for materialisation, `Result[T]` return wrapping, `limit: Optional[int] = None` for unbounded internal callers |
 | **`migration`** | adding/changing schema | migrations are generated via `make generate NAME=...`, never hand-written; existing files in `migrations/versions/` are immutable history; data migrations + enum additions need manual `op.execute` |
 | **`tests`** | editing `tests/unit/`, `tests/integration/`, `tests/e2e/` | per-use-case unit coverage, per-endpoint e2e coverage, **mutation-persistence tests** (follow every PATCH/POST with a GET to verify the change landed — not just assert 200), Contract↔Request field-mismatch detection, `loads=` opt-in-and-opt-out flow tests, authorization matrix (unauth + wrong-role), contract validation boundaries, and the e2e infra gotchas (`httpx.AsyncClient` + `ASGITransport` instead of `TestClient`, sync alembic fixture, session-scoped asyncio loop, HS256 key matching) |
+| **`api-client`** | integrating a new external HTTP API | the Client + Service split — `Client` lives under `infrastructure/http/clients/` and returns raw vendor-shaped Pydantic responses, `Service` lives under `application/` and maps vendor shapes into domain Results; one provider-agnostic `AsyncProvider` is shared by all clients via the middleware chain |
 
 ### Hooks (`.claude/hooks/`)
 
@@ -182,7 +185,7 @@ The authoritative project spec that Claude Code reads as part of its context on 
 - The **five-parameter list endpoint shape** with pagination, filter contracts, and `loads`
 - Strict vs lenient `OffsetPagination` split (presentation vs application)
 - `OffsetResult.map()` for Result → Contract conversion
-- Mediator + UseCase + Request + Result rules
+- RequestBus + UseCase + Request + Result rules (plus `EventBus` and the `Bus[M]` parent Protocol)
 - Naming conventions (single vs list, GET `query` vs POST `data`, OpenAPI tags)
 - Adding-a-new-feature checklist
 
@@ -193,13 +196,27 @@ If a rule isn't in `CLAUDE.md`, it isn't a rule.
 ## Makefile targets
 
 ```bash
+make install                       # uv sync --all-groups
 make upgrade                       # alembic upgrade head
 make downgrade                     # alembic downgrade -1
 make generate NAME="add_widget"    # alembic revision --autogenerate
+make history                       # alembic history
 
-make docker_dev_up                 # start dev containers (Postgres, Redis, NATS)
-make docker_dev_down               # stop them
-make docker_dev_rebuild            # down + build --no-cache
+make run-http                      # FastAPI + Granian
+make run-consumers                 # FastStream (NATS)
+make run-worker                    # Taskiq worker
+make run-scheduler                 # Taskiq scheduler
+
+make lint                          # ruff check
+make format                        # ruff format + ruff check --fix
+make typecheck                     # mypy --strict
+make check                         # lint + typecheck
+make test                          # all pytest
+make test-unit / test-integration / test-e2e
+
+make docker-dev-up                 # start dev containers (Postgres, Redis, NATS)
+make docker-dev-down               # stop them
+make docker-dev-rebuild            # down + build --no-cache
 ```
 
 ---
